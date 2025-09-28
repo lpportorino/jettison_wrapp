@@ -1,0 +1,12 @@
+# Example: Running a Python script with wrapp
+
+[redis]
+host = "localhost"
+port = 6379
+password = ""
+
+[app]
+executable = "python3"
+args = ["/home/user/scripts/data_processor.py", "--input", "/data/raw", "--output", "/data/processed"]
+user = ""  # Will use current user
+stream_name = "data_processor"

@@ -1,0 +1,21 @@
+# Build output
+build/
+
+# Test files
+test.toml
+*.test
+
+# Go workspace files
+go.work
+go.work.sum
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

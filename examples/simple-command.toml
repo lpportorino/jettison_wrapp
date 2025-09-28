@@ -1,0 +1,12 @@
+# Example: Simple command with no arguments
+
+[redis]
+host = "localhost"
+port = 6379
+password = ""
+
+[app]
+executable = "ls"
+args = ["-la", "/var/log"]
+user = ""
+stream_name = "directory_listing"

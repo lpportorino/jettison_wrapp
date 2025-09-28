@@ -1,0 +1,22 @@
+# Wrapp Configuration Example
+# This file contains all the settings needed to run wrapp
+
+[redis]
+host = "localhost"
+port = 6379
+password = "your_redis_password"
+
+[app]
+# The executable to run
+executable = "/usr/local/bin/myservice"
+
+# Arguments to pass to the executable
+args = ["--config", "/etc/myservice.conf", "--verbose"]
+
+# User to run the process as (only when wrapp runs as root)
+# Leave empty to use default behavior
+user = "serviceuser"
+
+# Name for the Redis streams (logs:app:<stream_name>:*)
+# If not specified, uses the executable's base name
+stream_name = "myservice"
