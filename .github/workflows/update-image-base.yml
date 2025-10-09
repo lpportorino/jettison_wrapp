@@ -1,0 +1,45 @@
+name: Update Image Base Submodule
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  update-submodule:
+    name: Update jettison_wrapp in Image Base
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Clone jettison_image_base repository
+        run: |
+          git clone --recursive https://${{ github.actor }}:${{ github.token }}@github.com/lpportorino/jettison_image_base.git image-base
+          cd image-base
+
+          # Setup SSH key for pushing
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PUSH_TO_JETTISON_IMAGE_BASE }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          # Switch to SSH remote
+          git remote set-url origin git@github.com:lpportorino/jettison_image_base.git
+
+          # Configure git
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          # Update jettison_wrapp submodule to latest commit
+          cd jettison_wrapp
+          git fetch origin
+          git checkout main
+          git pull origin main
+          cd ..
+
+          # Commit and push if there are changes
+          git add jettison_wrapp
+          git diff --staged --quiet || {
+            git commit -m "Update jettison_wrapp submodule from ${{ github.sha }}"
+            GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git push
+          }
