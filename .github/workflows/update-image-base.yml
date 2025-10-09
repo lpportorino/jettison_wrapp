@@ -15,17 +15,15 @@ jobs:
     steps:
       - name: Clone jettison_image_base repository
         run: |
-          git clone --recursive https://${{ github.actor }}:${{ github.token }}@github.com/lpportorino/jettison_image_base.git image-base
-          cd image-base
-
-          # Setup SSH key for pushing
+          # Setup SSH key
           mkdir -p ~/.ssh
           echo "${{ secrets.PUSH_TO_JETTISON_IMAGE_BASE }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-          # Switch to SSH remote
-          git remote set-url origin git@github.com:lpportorino/jettison_image_base.git
+          # Clone via SSH (not recursive to avoid trying to clone other private submodules)
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git clone git@github.com:lpportorino/jettison_image_base.git image-base
+          cd image-base
 
           # Configure git
           git config user.name "GitHub Actions"
