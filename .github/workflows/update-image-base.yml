@@ -8,7 +8,7 @@ on:
 jobs:
   update-submodule:
     name: Update jettison_wrapp in Image Base
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
 
