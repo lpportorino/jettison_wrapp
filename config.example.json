@@ -1,0 +1,13 @@
+{
+  "redis": {
+    "host": "localhost",
+    "port": 6379,
+    "secrets_dir": "/run/jon_secrets/vault/redis/wrapp"
+  },
+  "app": {
+    "executable": "/usr/local/bin/myservice",
+    "args": ["--config", "/etc/myservice.conf", "--verbose"],
+    "user": "serviceuser",
+    "stream_name": "myservice"
+  }
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pelletier/go-toml"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -31,18 +31,18 @@ var ctx = context.Background()
 type Config struct {
 	// Redis configuration
 	Redis struct {
-		Host     string `toml:"host"`
-		Password string `toml:"password"`
-		Port     int    `toml:"port"`
-	} `toml:"redis"`
+		Host       string `json:"host"`
+		Port       int    `json:"port"`
+		SecretsDir string `json:"secrets_dir"`
+	} `json:"redis"`
 
 	// Application configuration
 	App struct {
-		Executable string   `toml:"executable"`
-		Args       []string `toml:"args"`
-		User       string   `toml:"user"`
-		StreamName string   `toml:"stream_name"`
-	} `toml:"app"`
+		Executable string   `json:"executable"`
+		Args       []string `json:"args"`
+		User       string   `json:"user"`
+		StreamName string   `json:"stream_name"`
+	} `json:"app"`
 }
 
 type RedisLogger struct {
@@ -55,14 +55,14 @@ type RedisLogger struct {
 
 func main() {
     if len(os.Args) != 2 {
-        fmt.Fprintf(os.Stderr, "Usage: wrapp <path_to_toml>\n")
+        fmt.Fprintf(os.Stderr, "Usage: wrapp <path_to_config.json>\n")
         os.Exit(1)
     }
 
-    tomlPath := os.Args[1]
-    debugPrintf("Loading configuration from: %s", tomlPath)
+    configPath := os.Args[1]
+    debugPrintf("Loading configuration from: %s", configPath)
 
-    config, err := loadConfig(tomlPath)
+    config, err := loadConfig(configPath)
     if err != nil {
         fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
         os.Exit(1)
@@ -70,9 +70,13 @@ func main() {
 
     debugPrintf("Config loaded - Executable: %s, Args: %v, User: %s, Stream: %s",
         config.App.Executable, config.App.Args, config.App.User, config.App.StreamName)
-    debugPrintf("Redis connection: %s:%d", config.Redis.Host, config.Redis.Port)
+    debugPrintf("Redis connection: %s:%d (secrets: %s)", config.Redis.Host, config.Redis.Port, config.Redis.SecretsDir)
 
-    logger := NewRedisLogger(config)
+    logger, err := NewRedisLogger(config)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error creating Redis logger: %v\n", err)
+        os.Exit(1)
+    }
     defer logger.Close()
 
     if err := setupRedisConnection(logger.configClient); err != nil {
@@ -144,15 +148,15 @@ func tryRedisConnection(rdb *redis.Client) error {
 	return nil
 }
 
-func loadConfig(tomlPath string) (*Config, error) {
+func loadConfig(configPath string) (*Config, error) {
 	var config Config
-	configData, err := toml.LoadFile(tomlPath)
+	configData, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load TOML config file: %w", err)
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	if err := configData.Unmarshal(&config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	if err := json.Unmarshal(configData, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON config: %w", err)
 	}
 
 	// Set default stream name if not specified
@@ -165,12 +169,46 @@ func loadConfig(tomlPath string) (*Config, error) {
 	return &config, nil
 }
 
-func newRedisClient(config *Config, db int) *redis.Client {
+// loadRedisCredentials loads username and password from the secrets directory
+// Username is inferred from the directory basename
+// Password is read from the "password" file in the directory
+func loadRedisCredentials(config *Config) (username, password string, err error) {
+	if config.Redis.SecretsDir == "" {
+		return "", "", fmt.Errorf("redis.secrets_dir is required")
+	}
+
+	// Username = basename of secrets directory
+	username = filepath.Base(config.Redis.SecretsDir)
+	debugPrintf("Inferred Redis username from directory: %s", username)
+
+	// Read password from file
+	passwordPath := filepath.Join(config.Redis.SecretsDir, "password")
+	passwordData, err := os.ReadFile(passwordPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read password file %s: %w", passwordPath, err)
+	}
+
+	password = strings.TrimSpace(string(passwordData))
+	if password == "" {
+		return "", "", fmt.Errorf("password file %s is empty", passwordPath)
+	}
+
+	debugPrintf("Loaded Redis credentials for user: %s", username)
+	return username, password, nil
+}
+
+func newRedisClient(config *Config, db int) (*redis.Client, error) {
+	username, password, err := loadRedisCredentials(config)
+	if err != nil {
+		return nil, err
+	}
+
 	return redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%d", config.Redis.Host, config.Redis.Port),
-		Password: config.Redis.Password,
+		Username: username,
+		Password: password,
 		DB:       db,
-	})
+	}), nil
 }
 
 func waitRedisToBecomeAvailable(rdb *redis.Client, timeout, checkInterval time.Duration) error {
@@ -192,14 +230,29 @@ func waitRedisToBecomeAvailable(rdb *redis.Client, timeout, checkInterval time.D
 	}
 }
 
-func NewRedisLogger(config *Config) *RedisLogger {
+func NewRedisLogger(config *Config) (*RedisLogger, error) {
+	configClient, err := newRedisClient(config, 5)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create config client: %w", err)
+	}
+
+	logClient, err := newRedisClient(config, 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create log client: %w", err)
+	}
+
+	valueClient, err := newRedisClient(config, 2)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create value client: %w", err)
+	}
+
 	return &RedisLogger{
-		configClient:  newRedisClient(config, 5),
-		logClient:     newRedisClient(config, 1),
-		valueClient:   newRedisClient(config, 2),
+		configClient:  configClient,
+		logClient:     logClient,
+		valueClient:   valueClient,
 		maxBufferSize: 1024 * 1024 * 10,
 		streamName:    config.App.StreamName,
-	}
+	}, nil
 }
 
 func (rl *RedisLogger) Close() {
