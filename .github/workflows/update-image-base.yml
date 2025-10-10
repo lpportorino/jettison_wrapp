@@ -40,5 +40,26 @@ jobs:
           git add jettison_wrapp
           git diff --staged --quiet || {
             git commit -m "Update jettison_wrapp submodule from ${{ github.sha }}"
-            GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git push
+
+            # Retry push with rebase if conflicts occur
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git push; then
+                echo "Push succeeded"
+                exit 0
+              else
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                echo "Push failed (attempt $RETRY_COUNT/$MAX_RETRIES)"
+
+                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                  echo "Rebasing and retrying..."
+                  GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git pull --rebase
+                fi
+              fi
+            done
+
+            echo "Failed to push after $MAX_RETRIES attempts"
+            exit 1
           }
