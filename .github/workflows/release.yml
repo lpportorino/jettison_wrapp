@@ -1,0 +1,103 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build ARM64 and AMD64 binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.6'
+
+      - name: Build ARM64 binary (NVIDIA Jetson AGX Orin optimized)
+        run: |
+          CGO_ENABLED=0 \
+          GOOS=linux \
+          GOARCH=arm64 \
+          GOARM64=v8.2,crypto,lse \
+          go build \
+            -trimpath \
+            -ldflags="-s -w -extldflags=-static" \
+            -tags=netgo \
+            -o wrapp-arm64 \
+            .
+
+      - name: Build AMD64 binary (desktop testing)
+        run: |
+          CGO_ENABLED=0 \
+          GOOS=linux \
+          GOARCH=amd64 \
+          go build \
+            -trimpath \
+            -ldflags="-s -w -extldflags=-static" \
+            -tags=netgo \
+            -o wrapp-amd64 \
+            .
+
+      - name: Verify binaries
+        run: |
+          ls -lh wrapp-*
+          file wrapp-arm64
+          file wrapp-amd64
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          # Use short SHA for tag
+          TAG="build-$(git rev-parse --short HEAD)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Build ${{ github.sha }}
+          body: |
+            Automated build from commit ${{ github.sha }}
+
+            ## Binaries
+            - `wrapp-arm64` - ARM64 build optimized for NVIDIA Jetson AGX Orin (Cortex-A78AE)
+            - `wrapp-amd64` - AMD64 build for desktop testing
+
+            ## Build Details
+            - Commit: ${{ github.sha }}
+            - Go version: 1.23.6
+            - CGO: disabled (static linking)
+            - ARM64 optimizations: GOARM64=v8.2,crypto,lse
+
+            ## Installation
+
+            ### ARM64 (Jetson)
+            ```bash
+            curl -L -o wrapp https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/wrapp-arm64
+            chmod +x wrapp
+            sudo mv wrapp /usr/local/bin/
+            ```
+
+            ### AMD64 (Desktop)
+            ```bash
+            curl -L -o wrapp https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/wrapp-amd64
+            chmod +x wrapp
+            sudo mv wrapp /usr/local/bin/
+            ```
+          files: |
+            wrapp-arm64
+            wrapp-amd64
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
