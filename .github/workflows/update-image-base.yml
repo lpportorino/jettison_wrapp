@@ -29,7 +29,8 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-          # Update jettison_wrapp submodule to latest commit
+          # Initialize and update jettison_wrapp submodule to latest commit
+          git submodule update --init jettison_wrapp
           cd jettison_wrapp
           git fetch origin
           git checkout main
