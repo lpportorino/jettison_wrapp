@@ -43,6 +43,13 @@ type Config struct {
 		User       string   `json:"user"`
 		StreamName string   `json:"stream_name"`
 	} `json:"app"`
+
+	// Debug configuration (optional)
+	Debug struct {
+		Enabled bool   `json:"enabled"` // Enable step debugging with gdbserver
+		Port    int    `json:"port"`    // gdbserver port (default: 2345)
+		Host    string `json:"host"`    // gdbserver bind address (default: "127.0.0.1")
+	} `json:"debug"`
 }
 
 type RedisLogger struct {
@@ -68,9 +75,28 @@ func main() {
         os.Exit(1)
     }
 
+    // Set up debug configuration with defaults
+    debugConfig := DebugConfig{
+        Enabled: config.Debug.Enabled,
+        Port:    config.Debug.Port,
+        Host:    config.Debug.Host,
+    }
+
+    // Apply defaults
+    if debugConfig.Port == 0 {
+        debugConfig.Port = 2345 // Default GDB port
+    }
+    if debugConfig.Host == "" {
+        debugConfig.Host = "127.0.0.1" // Default to localhost
+    }
+
     debugPrintf("Config loaded - Executable: %s, Args: %v, User: %s, Stream: %s",
         config.App.Executable, config.App.Args, config.App.User, config.App.StreamName)
     debugPrintf("Redis connection: %s:%d (secrets: %s)", config.Redis.Host, config.Redis.Port, config.Redis.SecretsDir)
+
+    if debugConfig.Enabled {
+        debugPrintf("DEBUG MODE ENABLED: gdbserver will listen on %s:%d", debugConfig.Host, debugConfig.Port)
+    }
 
     logger, err := NewRedisLogger(config)
     if err != nil {
@@ -98,7 +124,7 @@ func main() {
     targetUser := determineUser(config.App.User)
     debugPrintf("Process will run as user: %s", targetUser)
 
-    if err := runExecutableAndLog(targetUser, absExecutable, config.App.Args, logger); err != nil {
+    if err := runExecutableAndLog(targetUser, absExecutable, config.App.Args, logger, debugConfig); err != nil {
         fmt.Fprintf(os.Stderr, "Error running executable: %v\n", err)
         os.Exit(1)
     }
@@ -414,7 +440,7 @@ func (rl *RedisLogger) createRunKeys() (string, string) {
     return rl.writeSeparator(separator)
 }
 
-func runExecutableAndLog(targetUser, executable string, args []string, logger *RedisLogger) error {
+func runExecutableAndLog(targetUser, executable string, args []string, logger *RedisLogger, debugConfig DebugConfig) error {
     debugPrintf("Starting executable: %s with args: %v", executable, args)
 
     // Create stream keys and write start separator
@@ -433,6 +459,7 @@ func runExecutableAndLog(targetUser, executable string, args []string, logger *R
 
     cmd := createCommand(targetUser, executable, args)
 
+    // Set up pipes BEFORE starting the process
     stdoutPipe, err := cmd.StdoutPipe()
     if err != nil {
         logger.logMessage(infoKey, fmt.Sprintf("Error setting up stdoutPipe: %v", err), "error")
@@ -444,10 +471,31 @@ func runExecutableAndLog(targetUser, executable string, args []string, logger *R
         return err
     }
 
-    if err := cmd.Start(); err != nil {
-        logger.logMessage(infoKey, fmt.Sprintf("Error starting command: %v", err), "error")
-        debugPrintf("Failed to start process: %v", err)
-        return err
+    // Debug mode handling
+    var gdbserverCmd *exec.Cmd
+    if debugConfig.Enabled {
+        // Log debug mode activation
+        logger.logMessage(infoKey, "DEBUG MODE: Starting process paused for step debugging", "status")
+        debugInfo := getDebugConnectionInfo(debugConfig, executable)
+        logger.logMessage(infoKey, debugInfo, "status")
+        fmt.Println(debugInfo) // Also print to stdout
+
+        // Set up debug session (starts process paused, launches gdbserver)
+        gdbserverCmd, err = setupDebugSession(cmd, debugConfig)
+        if err != nil {
+            logger.logMessage(infoKey, fmt.Sprintf("Failed to setup debug session: %v", err), "error")
+            return fmt.Errorf("debug setup failed: %w", err)
+        }
+
+        // Note: cmd.Start() already called in setupDebugSession
+        // PID is available in cmd.Process.Pid
+    } else {
+        // Normal mode: start process normally
+        if err := cmd.Start(); err != nil {
+            logger.logMessage(infoKey, fmt.Sprintf("Error starting command: %v", err), "error")
+            debugPrintf("Failed to start process: %v", err)
+            return err
+        }
     }
     debugPrintf("Process started with PID: %d", cmd.Process.Pid)
 
@@ -461,6 +509,14 @@ func runExecutableAndLog(targetUser, executable string, args []string, logger *R
 
     err = cmd.Wait()
     exitCode := getExitCode(err)
+
+    // Clean up gdbserver if it was started
+    if gdbserverCmd != nil {
+        debugPrintf("Terminating gdbserver (PID: %d)", gdbserverCmd.Process.Pid)
+        gdbserverCmd.Process.Kill()
+        gdbserverCmd.Wait() // Clean up zombie
+    }
+
     if err != nil {
         logger.logMessage(infoKey, fmt.Sprintf("Error waiting for command to finish: %v", err), "error")
     }
