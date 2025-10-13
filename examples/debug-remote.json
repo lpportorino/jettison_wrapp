@@ -1,0 +1,36 @@
+{
+  "_description": "Remote debug example - Debugging over SSH tunnel",
+  "redis": {
+    "host": "localhost",
+    "port": 6379,
+    "secrets_dir": "/run/jon_secrets/vault/redis/wrapp"
+  },
+  "app": {
+    "executable": "/usr/bin/python3",
+    "args": ["-u", "/app/script.py"],
+    "user": "archer",
+    "stream_name": "python-debug"
+  },
+  "debug": {
+    "enabled": true,
+    "port": 2345,
+    "host": "127.0.0.1"
+  },
+  "_instructions": [
+    "SECURITY: Bind to 127.0.0.1 and use SSH tunnel for remote access",
+    "",
+    "From your dev machine, create SSH tunnel:",
+    "  ssh -L 2345:localhost:2345 archer@jetson.local",
+    "",
+    "Then connect GDB to localhost:",
+    "  gdb /usr/bin/python3",
+    "  (gdb) target remote localhost:2345",
+    "  (gdb) break main",
+    "  (gdb) continue",
+    "",
+    "Or use CLion Remote GDB Server:",
+    "  Run → Edit Configurations → + → Remote GDB Server",
+    "  'target remote' args: localhost:2345",
+    "  Symbol file: /usr/bin/python3"
+  ]
+}

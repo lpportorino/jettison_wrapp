@@ -9,5 +9,12 @@
     "args": ["--config", "/etc/myservice.conf", "--verbose"],
     "user": "serviceuser",
     "stream_name": "myservice"
-  }
+  },
+  "_comment_debug": "Optional: Enable step debugging with gdbserver",
+  "debug": {
+    "enabled": false,
+    "port": 2345,
+    "host": "127.0.0.1"
+  },
+  "_comment_debug_usage": "Set enabled:true to pause process at first instruction and launch gdbserver. Requires container with --cap-add=SYS_PTRACE and --security-opt seccomp=unconfined"
 }

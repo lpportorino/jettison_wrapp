@@ -125,6 +125,175 @@ This generates:
 └── acl       (Redis server uses this)
 ```
 
+## Step Debugging with GDB
+
+Wrapp supports remote debugging via gdbserver, allowing you to step through your wrapped application **before it reaches `main()`**. The process starts paused at the first instruction after `execve`, giving you full control from the very beginning.
+
+### Prerequisites
+
+- **Ubuntu 22.04 variant** container image (includes gdb/gdbserver)
+- Container with **`SYS_PTRACE` capability** and relaxed seccomp profile
+- GDB or CLion on your development machine
+
+### Configuration
+
+Add a `"debug"` section to your JSON config:
+
+```json
+{
+  "debug": {
+    "enabled": true,
+    "port": 2345,
+    "host": "127.0.0.1"
+  }
+}
+```
+
+### Container Requirements
+
+#### Podman/Docker CLI
+
+```bash
+podman run -it --rm \
+  --cap-add=SYS_PTRACE \
+  --security-opt seccomp=unconfined \
+  -p 2345:2345 \
+  -v $(pwd)/config.json:/config.json:ro \
+  ghcr.io/lpportorino/jettison-base-ubuntu22:latest \
+  wrapp /config.json
+```
+
+**Why these options are required:**
+- `--cap-add=SYS_PTRACE`: Allows wrapp to use ptrace syscalls to pause the child process
+- `--security-opt seccomp=unconfined`: Allows ptrace, waitpid, and other debugging syscalls
+- `-p 2345:2345`: Exposes gdbserver port for remote connection
+
+#### Quadlet Configuration (`.container` file)
+
+```ini
+[Container]
+Image=ghcr.io/lpportorino/jettison-base-ubuntu22:latest
+Volume=/etc/myapp/config.json:/config.json:ro,Z
+PublishPort=2345:2345
+SecurityOpt=seccomp=unconfined
+AddCapability=SYS_PTRACE
+Exec=wrapp /config.json
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+### Connecting with GDB
+
+From your development machine:
+
+```bash
+# Start GDB with the executable
+gdb /path/to/executable
+
+# Connect to gdbserver
+(gdb) target remote <host>:2345
+
+# Process is paused at first instruction
+# Set breakpoints
+(gdb) break main
+(gdb) break some_function
+
+# Continue execution
+(gdb) continue
+
+# Step through code
+(gdb) step
+(gdb) next
+```
+
+### Connecting with CLion
+
+1. **Run → Edit Configurations → + → Remote GDB Server**
+2. **Configuration**:
+   - **'target remote' args**: `<host>:2345`
+   - **Symbol file**: Upload executable or use local copy
+   - **Path mappings** (if needed): Container `/` → Local path
+3. **Start Debug Session**: Click debug icon
+4. **Set breakpoints** and step through code
+
+### Remote Debugging (SSH Tunnel)
+
+For secure remote debugging, use an SSH tunnel instead of binding to `0.0.0.0`:
+
+```bash
+# On dev machine: Create SSH tunnel
+ssh -L 2345:localhost:2345 archer@jetson.local
+
+# In config.json: Bind to localhost only
+{
+  "debug": {
+    "enabled": true,
+    "port": 2345,
+    "host": "127.0.0.1"
+  }
+}
+
+# On dev machine: Connect GDB to localhost
+gdb /path/to/executable
+(gdb) target remote localhost:2345
+```
+
+### How It Works
+
+1. **Wrapp starts the child process** with `PTRACE_TRACEME`, causing it to stop immediately after `execve` (before any code runs)
+2. **Wrapp detaches** from ptrace while keeping the process stopped
+3. **gdbserver launches** and attaches to the stopped process
+4. **Process remains paused** until your debugger connects and continues execution
+
+This approach gives you complete control from the first instruction, even before `main()` or any library initialization code runs.
+
+### Example Debug Sessions
+
+See the `examples/` directory:
+- `debug-simple.json` - Basic local debugging
+- `debug-remote.json` - Remote debugging with SSH tunnel
+- `debug-container.json` - Container-based debugging
+
+### Security Considerations
+
+**⚠️ WARNING: Debug mode is for development only**
+
+- **gdbserver has no authentication** - anyone who can connect to the port has full control over the process
+- **Bind to `127.0.0.1` by default** to restrict access to localhost
+- **Use SSH tunnels** for remote debugging instead of binding to `0.0.0.0`
+- **Never enable debug mode in production** - it pauses the process until a debugger connects
+- **Use firewall rules** to restrict port 2345 access
+
+### Troubleshooting
+
+#### "Operation not permitted" errors
+
+**Cause**: Container doesn't have `SYS_PTRACE` capability
+
+**Fix**: Add `--cap-add=SYS_PTRACE` and `--security-opt seccomp=unconfined`
+
+#### Process hangs at startup
+
+**Expected behavior**: When debug mode is enabled, the process waits for a debugger to connect. Check the wrapp output for connection instructions.
+
+#### "Connection refused" when connecting GDB
+
+**Check**:
+1. Port is published: `-p 2345:2345`
+2. gdbserver is listening: Check wrapp logs
+3. Firewall allows connection
+4. Correct host address (use `localhost` if SSH tunnel)
+
+#### Can't set breakpoints
+
+**Cause**: GDB doesn't have debug symbols
+
+**Fix**: Ensure you're using the same executable binary that's running in the container, or provide symbol file path in CLion
+
 ## Usage
 
 ### Basic Usage

@@ -1,0 +1,35 @@
+{
+  "_description": "Container debug example - Debugging inside a container",
+  "redis": {
+    "host": "redis",
+    "port": 6379,
+    "secrets_dir": "/run/jon_secrets/vault/redis/wrapp"
+  },
+  "app": {
+    "executable": "/app/myapp",
+    "args": ["--config", "/etc/myapp.conf", "--verbose"],
+    "user": "archer",
+    "stream_name": "myapp-debug"
+  },
+  "debug": {
+    "enabled": true,
+    "port": 2345,
+    "host": "0.0.0.0"
+  },
+  "_instructions": [
+    "Start container with:",
+    "  podman run -it --rm \\",
+    "    --cap-add=SYS_PTRACE \\",
+    "    --security-opt seccomp=unconfined \\",
+    "    -p 2345:2345 \\",
+    "    -v $(pwd)/debug-container.json:/config.json:ro \\",
+    "    ghcr.io/lpportorino/jettison-base-ubuntu22:latest \\",
+    "    wrapp /config.json",
+    "",
+    "Then connect from host:",
+    "  gdb /app/myapp",
+    "  (gdb) target remote localhost:2345",
+    "  (gdb) break main",
+    "  (gdb) continue"
+  ]
+}
