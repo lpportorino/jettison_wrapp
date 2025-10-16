@@ -21,18 +21,15 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-          # Clone via SSH (not recursive to avoid trying to clone other private submodules)
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git clone git@github.com:lpportorino/jettison_image_base.git image-base
+          # Clone via SSH with recursive submodules
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git clone --recurse-submodules git@github.com:lpportorino/jettison_image_base.git image-base
           cd image-base
 
           # Configure git
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-          # Initialize and update jettison_wrapp submodule to latest commit
-          # Configure submodule to use HTTPS with GITHUB_TOKEN for cloning
-          git config submodule.jettison_wrapp.url https://x-access-token:${{ github.token }}@github.com/lpportorino/jettison_wrapp.git
-          git submodule update --init jettison_wrapp
+          # Update jettison_wrapp submodule to latest commit
           cd jettison_wrapp
           git fetch origin
           git checkout main
